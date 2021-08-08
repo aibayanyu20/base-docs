@@ -67,3 +67,161 @@ fn1();
 console.log(window); // window
 console.log(window.bar); // undefined
 ```
+
+如果我们换一种调用方式如下：
+
+```js
+foo.fn();
+```
+
+这时候的`this`指向就是调用它的对象。
+
+<Alert type="info">
+总结：
+  根据上面的例子，我们可以看出，在执行函数时不考虑显示绑定(bind/apply/call)的情况下，如果函数中的this是被上一级对象所调用，那么this指向就一定时上一级的对象；否则指向的就是全局的环境。
+</Alert>
+
+3. 上下文对象中的`this`
+
+- 例子一
+
+最终拿到的`this`就是`student`
+
+```js
+const student = {
+  name: 'test',
+  fn: function () {
+    return this;
+  },
+};
+
+console.log(student.fn() === student); // true
+```
+
+- 例子二
+
+```js
+const person = {
+  name: 'test',
+  brother: {
+    name: 'mike',
+    fn: function () {
+      return this.name;
+    },
+  },
+};
+console.log(person.brother.fn()); // mike
+```
+
+> `this`指向的是最后调用它的对象，所以输出的是`mike`
+
+- 例子三：请描述以下代码的运行结果。
+
+```js
+const o1 = {
+  text: 'o1',
+  fn: function () {
+    return this.text;
+  },
+};
+
+const o2 = {
+  text: 'o2',
+  fn: function () {
+    return o1.fn();
+  },
+};
+
+const o3 = {
+  text: 'o3',
+  fn: function () {
+    const fn = o1.fn;
+    return fn();
+  },
+};
+
+console.log(o1.fn()); // o1
+console.log(o2.fn()); // o1
+console.log(o3.fn()); // undefined
+```
+
+> 点击下方的按钮我们最后打印出来的内容，看到的就是`o1,o1,undefined`，前两个我们都好理解，为什么第三个是 undefined 的呢？
+
+因为在最后一个中，我们通过`const fn = o1.fn`的赋值进行了“裸奔”调用，因此这里的`this`指向`window`，所以运行出来的就是`undefined`。
+
+<br />
+
+<code src="./demo/demo.tsx"></code>
+
+- 如何让上面的例子中的第二个打印`o2`且不使用`call/apply/bind`？
+
+```js
+const o1 = {
+  text: 'o1',
+  fn: function () {
+    return this.text;
+  },
+};
+
+const o2 = {
+  text: 'o2',
+  fn: o1.fn,
+};
+console.log(o2.fn()); // o2
+```
+
+<br />
+
+<code src="./demo/demo2.tsx"></code>
+
+> 在上面的代码中，我们将`o1.fn`函数赋值给了`o2`，将函数挂载到了`o2`对象，`fn`最终作为`o2`对象的方法被调用。我们根据我们的测试做出以下总结结论。
+
+<Alert type="info">
+总结：我们不难看出，`this`指向的都是最终调用它的对象。
+</Alert>
+
+- 例子四：通过`call/apply/bind`改变`this`指向。
+
+首先我们来说一下，这三者之间的共同点和区别：
+
+1. 都是用来改变相关函数的 this 指向的。
+2. `call/apply`是直接调用相关函数。`bind`不会执行相关函数，而是返回一个新的函数。
+
+我们用一个例子来演示一下：
+
+```ts
+const target = [];
+fn.call(target, 'arg1', 'arg2');
+fn.apply(target, ['arg1', 'arg2']);
+fn.bind(target, 'arg1', 'arg2')();
+```
+
+我们现在用的这三种方式是等价的，能更直观的区分三者之间的区别。
+
+- 例子五：构造函数和`this`
+
+```ts
+function Foo() {
+  this.bar = 'FOO';
+}
+const instance = new Foo();
+console.log(instance.bar); // FOO
+```
+
+不难看出，我们上面的例子返回的就是一个`FOO`但是在`new`的时候具体做了哪些操作呢？
+
+1. 创建一个对象
+2. 将构造函数的`this`指向这个新的对象。
+3. 为这个对象添加属性、方法等。
+4. 最终返回新的对象。
+
+用代码表述，就像如下：
+
+```js
+// 定义空对象
+const obj = {};
+// 将Foo的原型给obj
+obj.__proto__ = Foo.prototype;
+// 将Foo的this指向到obj
+Foo.call(obj);
+```
