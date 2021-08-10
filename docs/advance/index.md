@@ -290,4 +290,33 @@ bar 函数本身是通过`bind`方法构造的函数，其内部已经将`this`�
 
 <code src="./demo/demo5.tsx"></code>
 
+我们点操作一的时候：
+
 这个时候我们输出的值为 2，由于`foo`中的`this`绑定到了`obj1`上，所以`bar`中引用的箭头函数也会绑定到`obj1`上，箭头函数的绑定无法被修改。
+
+我们点操作二的时候：
+
+这个时候输出的就是`undefined`由于当前我们使用的是`React`作为项目的代码逻辑示例，采用的是严格模式，所以输出的就是`undefined`其实真正挂在到的是`window`对象中，会输出`123`。
+
+这时候我们将定义的`var c = 123`改为`const`在执行的时候，会发现我们的答案变成了`undefined`这是因为`const`声明的变量不会被挂载到`window`对象中去，所以`this`指向`window`的时候，自然也找不到变量`c`了。
+
+最终实战：实现一个`bind`函数
+
+```js
+Function.prototype.bind =
+  Function.prototype.bind ||
+  function (ctx) {
+    var that = this;
+    // 截取参数并返回一个数组，
+    // 为什么这么写，
+    // arguments表面上是一个数组的格式，
+    // 但是并没有原生数组slice这个功能，
+    // 所以通过这种方式去掉第一个参数后面的所有参数。
+    var args = Array.prototype.slice.call(arguments, 1);
+    return function bound() {
+      var innerArgs = Array.prototype.slice.call(arguments);
+      var finalArgs = args.concat(innerArgs);
+      return that.apply(ctx, finalArgs);
+    };
+  };
+```
