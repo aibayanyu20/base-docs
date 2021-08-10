@@ -225,3 +225,69 @@ obj.__proto__ = Foo.prototype;
 // 将Foo的this指向到obj
 Foo.call(obj);
 ```
+
+如果在构造函数中出现`return`的时候，就需要注意了，我们根据两个例子来讲解。
+
+例子 1.
+
+```js
+function Foo() {
+  this.name = 'Test';
+  const o = {};
+  return o;
+}
+
+const instance = new Foo();
+console.log(instance.name); // undefined
+```
+
+> 这时候我们打印出来的就是`undefined`为什么会是`undefined`呢？
+
+- 因为在构造函数中返回了一个对象`o`当我们在实例化对象的时候返回的就是`return`出来的这个对象。
+
+```js
+function Foo() {
+  const name = 'test';
+  return 1;
+}
+
+const instance = new Foo();
+console.log(instance.name); // test
+```
+
+> 这时候我们看到真实实例化的对象就是构造函数，并不是 1。所以我们可以总结如下。
+
+<Alert type="info">
+如果在构造函数中显式的返回一个值，如果返回的是一个对象（复杂类型），那么this的指向就是返回的这个对象，如果返回的不是一个对象（基本类型），那么this仍然指向的是实例。
+</Alert>
+
+例子六：`this`优先级
+
+显式绑定：通过`call/apply/bind/new`对`this`进行绑定。
+
+隐式绑定：根据调用关系确定`this`指向的情况。
+
+点击执行下面的例子：
+
+<code src="./demo/demo3.tsx"></code>
+
+<br/>
+
+根据上面的例子我们不难看出，输出的结果分别是 1 和 2，也就是说`call/apply`的显式绑定一般来说优先级更高一些。
+
+我们再来看一下另一个例子：
+
+<code src="./demo/demo4.tsx"></code>
+
+<br />
+
+当我们点击第一个按钮的时候，输出的是 2，当我们点击第二个按钮的时候输出的是 3，我们可以得出如下的结论：
+
+bar 函数本身是通过`bind`方法构造的函数，其内部已经将`this`绑定为`obj1`，当它再次作为构造函数通过`new`被调用时，返回的实例就已经与`obj1`解绑了，也就是说`new`绑定修改了`bind`绑定中的`this`指向，
+因此`new`的优先级高于`bind`。
+
+我们再看一个典型的例子：
+
+<code src="./demo/demo5.tsx"></code>
+
+这个时候我们输出的值为 2，由于`foo`中的`this`绑定到了`obj1`上，所以`bar`中引用的箭头函数也会绑定到`obj1`上，箭头函数的绑定无法被修改。
