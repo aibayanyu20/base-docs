@@ -149,3 +149,157 @@ console.log('end here');
 由此可见，每次主线程执行栈为空的时候优先执行的就是微任务队列，微任务队列为空的时候才会执行宏任务中的队列。
 
 ## Promise 的实现原理
+
+在我们实现 Promise 之前，我们先从`Promise`化一个 API 来聊一下，我们在做小程序开发的时候，一个很经典的例子就是`wx.request`的 API，我们可以发现配置化的 API，经常容易出现的一个问题
+就是"回调地狱"问题。所以为了解决这个问题，我们可以将`wx.request`进行`Promise`化开发。
+
+由于我们使用微信小程序的大部分 API 的时候，都会有一个`success`和`fail`，所以我们这里实现一个简易的`Promise`化的函数。
+
+```js
+const promisefy = (fn) => (args) =>
+  new Promise((resolve, reject) => {
+    args.success = function (res) {
+      return resolve(res);
+    };
+    args.fail = function (err) {
+      return reject(err);
+    };
+  });
+```
+
+下面我们再使用微信小程序的 API 的时候，我们可以这样使用`const wxRequest = promisefy(wx.request)`来将 API 转化。
+
+通过上面的例子我们不难发现，其实就是一个构造函数创建一个`Promise`的实例。
+
+### 实现`Promise`
+
+1. 分析`Promise`就是一个构造函数。入参为函数类型的参数，这个函数自动具有`resovle`和`reject`方法。
+2. 包含了一个`then`方法。需要定义两个参数，分别是`onfulfilled`和`onrejected`，他们都是函数类型的参数。
+3. 其中`onfulfilled`通过参数可以获取`Promise`对象经过`resolve`处理后的值。
+4. `onrejected`可以获取`Promise`对象经过`reject`处理后的值。
+5. 需要存储`Promise`的三种状态`pending/fulfilled/rejected`。状态只会发生一次改变，是不可逆的，也是不能被二次改变的。（只允许在`pedding`下修改状态）
+
+```js
+function Promise(executor) {
+  const self = this;
+  this.status = 'pedding';
+  this.value = null;
+  this.reason = null;
+  function resolve(value) {
+    if (self.status === 'pedding') {
+      self.value = value;
+      self.status = 'fulfilled';
+    }
+  }
+
+  function reject(reason) {
+    if (self.status === 'pedding') {
+      self.reason = reason;
+      self.status = 'rejected';
+    }
+  }
+}
+
+// 增加原型中的then方法
+Promise.prototype.then = function (onfulfilled, onrejected) {
+  onfulfilled =
+    typeof onfulfilled === 'function' ? onfulfilled : (data) => data;
+  onrejected =
+    typeof onrejected === 'function'
+      ? onrejected
+      : (error) => {
+          throw error;
+        };
+  if (this.status === 'fulfilled') {
+    onfulfilled(this.value);
+  }
+  if (this.status === 'rejected') {
+    onrejected(this.reason);
+  }
+};
+```
+
+_为什么`then`要放到 Promise 构造函数的原型上，而不是放在构造函数内部呢？_
+
+因为每个`Promise`实例的`then`方法逻辑都是一致的，实例在调用该方法时，可以通过原型`Promise.prototype`来调用，而不是需要每次实例化都创建一个`then`方法，以便节省内存，显然更合适。
+
+这个时候我们使用一下我们自己写的这个`Promise`:
+
+```js
+let promise = new Promise((resolve, reject) => {
+  setTimeout(() => {
+    resolve('data');
+  }, 2000);
+});
+
+promise.then((data) => {
+  console.log(data);
+});
+```
+
+我们会发现，代码并没有任何输出信息，为什么呢？
+
+我们在实现逻辑全是同步的，我们自定义的`then`方法中的`onfufilled`也是同步执行的，当时的状态为`pedding`状态，并没有做到 2s 后执行。
+
+那么我们该如何去调用呢？
+
+```js
+function Promise() {
+  this.status = 'pedding';
+  this.onfulfilledFun = Function.prototype;
+  this.onrejectedFun = Function.prototype;
+  this.value = null;
+  this.reason = null;
+  const resovle = (data) => {
+    if (data instanceof Promise) {
+      // 判断当前是不是还是一个Promise
+      return data.then(resovle, reject);
+    }
+    setTimeout(() => {
+      if (this.status === 'pedding') {
+        this.status = 'fulfilled';
+        this.value = data;
+        this.onfullfilledFun(data);
+      }
+    });
+  };
+
+  const reject = (reason) => {
+    setTimeout(() => {
+      if (this.status === 'pedding') {
+        this.reason = reason;
+        this.status = 'rejected';
+        this.onrejectedFun(reason);
+      }
+    });
+  };
+}
+
+Promise.prototype.then = function (onfulfilled, onrejected) {
+  onfulfilled =
+    typeof onfulfilled === 'function' ? onfulfilled : (data) => data;
+  onrejected =
+    typeof onrejected === 'function'
+      ? onrejected
+      : (error) => {
+          throw error;
+        };
+
+  if (this.status === 'pedding') {
+    this.onfullfilledFun = onfulfilled;
+    this.onrejectedFun = onrejected;
+  }
+  if (this.status === 'fulfilled') {
+    onfulfilled(this.value);
+  }
+
+  if (this.status === 'rejected') {
+    onrejected(this.reason);
+  }
+};
+```
+
+这个时候，我们整个的实现一个基本的 Promise 就已经完成了，需要注意的是，我们这里采用的是`setTimeout`让`then`回调方法不直接阻止主线的任务流程，
+但是我们在正常使用`Promise`的时候，需要放到微任务队列中，我们可以通过`MutationObserver`来模仿`nextTick`。
+
+到此为止，一个最基本的`Promise`我们就已经实现了，接下来我们将继续完善一些细节。
