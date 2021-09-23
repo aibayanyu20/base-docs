@@ -244,7 +244,7 @@ promise.then((data) => {
 那么我们该如何去调用呢？
 
 ```js
-function Promise() {
+function Promise(executor) {
   this.status = 'pedding';
   this.onfulfilledFun = Function.prototype;
   this.onrejectedFun = Function.prototype;
@@ -273,6 +273,7 @@ function Promise() {
       }
     });
   };
+  executor(resolve, reject);
 }
 
 Promise.prototype.then = function (onfulfilled, onrejected) {
@@ -303,3 +304,224 @@ Promise.prototype.then = function (onfulfilled, onrejected) {
 但是我们在正常使用`Promise`的时候，需要放到微任务队列中，我们可以通过`MutationObserver`来模仿`nextTick`。
 
 到此为止，一个最基本的`Promise`我们就已经实现了，接下来我们将继续完善一些细节。
+
+### 细节完善
+
+我们现在有一个需求，就是在`Promise`实例状态变更之前添加多个`then`方法，接下来看一下我们自己的是不是能实现这种功能。
+
+```js
+let promise = new Promise((resolve, reject) => {
+  setTimeout(() => {
+    resolve('data');
+  }, 2000);
+});
+
+promise.then((data) => {
+  console.log(`1:${data}`);
+});
+
+promise.then((data) => {
+  console.log(`2:${data}`);
+});
+// 输出
+// 2:data
+```
+
+可以看到我们实现的 Promise 只会输出`2:data`，这是因为第二个`then`方法中的`onFulfilledFun`会覆盖第一个`then`方法中的`onFulfilledFun`，所以我们需要做进一步的改进，存储的时候我们需要存储一个数组，
+`onfulfilledArr`，在当前 Promise 被执行的时候循环调用`onfulfilledArr`中的方法即可。
+
+```js
+function Promise(executor) {
+  this.status = 'pedding';
+  this.value = null;
+  this.reason = null;
+  this.onFulfilledArr = [];
+  this.onRejectedArr = [];
+
+  const resolve = (data) => {
+    if (data instanceof Promise) {
+      // 判断当前是不是还是一个Promise
+      return data.then(resovle, reject);
+    }
+    setTimeout(() => {
+      if (this.status === 'pedding') {
+        this.value = data;
+        this.status = 'fulfilled';
+        this.onFulfilledArr.forEach((v) => {
+          // 执行
+          v(data);
+        });
+      }
+    });
+  };
+
+  const reject = (reason) => {
+    setTimeout(() => {
+      if (this.status === 'pedding') {
+        this.reason = reason;
+        this.status = 'rejected';
+        this.onRejectedArr.forEach((v) => {
+          // 执行
+          v(reason);
+        });
+      }
+    });
+  };
+  try {
+    executor(resolve, reject);
+  } catch (e) {
+    reject(e);
+  }
+}
+
+Promise.prototype.then = function (onfulfilled, onrejected) {
+  onfulfilled =
+    typeof onfulfilled === 'function' ? onfulfilled : (data) => data;
+  onrejected =
+    typeof onrejected === 'function'
+      ? onrejected
+      : (error) => {
+          throw error;
+        };
+  if (this.status === 'pedding') {
+    this.onFulfilledArr.push(onfulfilled);
+    this.onRejectedArr.push(onrejected);
+  }
+  if (this.status === 'fulfilled') {
+    onfulfilled(this.value);
+  }
+  if (this.status === 'rejected') {
+    onrejected(this.reason);
+  }
+};
+```
+
+如果我们在执行函数`executor`的时候抛出了异常，我们需要使用`try...catch`进行包裹，防止出现异常捕获不到的问题。
+
+通过我们上面的手写`Promise`我们得到的结论如下：
+
+1. Promise 的状态具有凝固性。（如果状态发生改变，就不会再次进行改变了）
+2. Promise 可以在 then 方法第二个参数中进行错误处理。
+3. Promise 实例可以添加多个 then 处理场景。
+
+### 链式调用
+
+我们先来看一下在`ES6`中实现的`Promise`的链式调用。
+
+```js
+const promise = new Promise((resolve, reject) => {
+  setTimeout(() => {
+    resolve('aab');
+  }, 2000);
+});
+
+promise
+  .then((data) => {
+    console.log(data);
+    return `${data} next then`;
+  })
+  .then((data) => {
+    console.log(data);
+  });
+
+// 输出
+// aab
+// aab next then
+```
+
+我们分析一下上面的这个例子：
+
+我们的值经过`resolve`处理后，如果在`then`方法体的`onfulfilled`函数中同步显示返回的新值，则将会在新的`Promise`实例`then`方法的`onfulfilled`函数中输出新值。
+
+如果我们直接另一个 Promise 实例呢？
+
+```js
+const promise = new Promise((resolve, reject) => {
+  setTimeout(() => {
+    resolve('123');
+  }, 2000);
+});
+
+promise
+  .then((data) => {
+    console.log(data);
+    return new Promise((resolve, reject) => {
+      setTimeout(() => {
+        resolve('456');
+      }, 4000);
+    });
+  })
+  .then((data) => {
+    console.log(data);
+  });
+
+// 输出
+// 123 2秒后输出的内容
+// 456 6秒后输出的内容
+```
+
+根据上面的例子我们不难看出，处理支持返回一个普通的值以外，还支持返回一个`Promise`的实例传给下一个`then`。
+
+### 初步实现链式调用
+
+我们可以在我们的`then`方法中直接返回一个`Promise`实例。
+
+```js
+Promise.prototype.then = function (onfulfilled, onrejected) {
+  onfulfilled =
+    typeof onfulfilled === 'function' ? onfulfilled : (data) => data;
+  onrejected =
+    typeof onrejected === 'function'
+      ? onrejected
+      : (error) => {
+          throw error;
+        };
+  // 定义一个Promise
+  let promise2;
+  if (this.status === 'fulfilled') {
+    return (promise2 = new Promise((resolve, reject) => {
+      setTimeout(() => {
+        try {
+          let res = onfulfilled(this.value);
+          resolve(res);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }));
+  }
+
+  if (this.status === 'rejected') {
+    return (promise2 = new Promise((resovle, reject) => {
+      setTimeout(() => {
+        try {
+          let res = onrejected(this.value);
+          resovle(res);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }));
+  }
+  if (this.status === 'pedding') {
+    return (promise2 = new Promise((resolve, reject) => {
+      this.onFulfilledArr.push(() => {
+        try {
+          let res = onfulfilled(this.value);
+          resolve(res);
+        } catch (e) {
+          reject(e);
+        }
+      });
+      this.onRejectedArr.push(() => {
+        try {
+          let res = onrejected(this.reason);
+          resolve(res);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    }));
+  }
+};
+```
